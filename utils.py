@@ -138,3 +138,126 @@ def sobel_filter(image: np.ndarray, mode_of_ext: str = 'reflect') -> np.ndarray:
     
     gradient_magnitude = gradient_magnitude / gradient_magnitude.max() * 255
     return gradient_magnitude.astype(np.uint8)
+
+def compute_fourier_coefficients(image, m=100, n=100):
+    """Вычисление коэффициентов Фурье a_jk для изображения.
+    Параметры:
+    image - np.array(черно-белая картинка)
+    m - Количество гармоник по x
+    n - Количество гармоник по y
+    """
+    l1, l2 = image.shape
+    x = np.arange(l1)
+    y = np.arange(l2)
+    j_values = np.arange(-m, m+1)
+    k_values = np.arange(-n, n+1)
+    
+    X, Y = np.meshgrid(x, y, indexing='ij')
+    
+    a_jk = np.zeros((2*m+1, 2*n+1))
+    for j_idx, j in enumerate(j_values):
+        for k_idx, k in enumerate(k_values):
+            cos_j = np.cos(np.pi * j * X / l1)
+            cos_k = np.cos(np.pi * k * Y / l2)
+            integrand = image * cos_j * cos_k
+            a_jk[j_idx, k_idx] = np.sum(integrand) / (l1 * l2)
+    return a_jk
+
+def reconstruct_image(image, new_size, m=100, n=100):
+    """Восстановление изображения с новым размером.
+    Параметры:
+    image - np.array(черно-белая картинка)
+    new_size - кортеж чисел с новыми размерами(высота, ширина)
+    m - Количество гармоник по x
+    n - Количество гармоник по y
+    """
+    a_jk = compute_fourier_coefficients(image, m, n)
+    
+    new_l1, new_l2 = new_size
+    x_new = np.linspace(0, new_l1-1, new_l1)
+    y_new = np.linspace(0, new_l2-1, new_l2)
+    X_new, Y_new = np.meshgrid(x_new, y_new, indexing='ij')
+    
+    reconstructed = np.zeros((new_l1, new_l2))
+    j_values = np.arange(-m, m+1)
+    k_values = np.arange(-n, n+1)
+    
+    for j_idx, j in enumerate(j_values):
+        for k_idx, k in enumerate(k_values):
+            cos_j = np.cos(np.pi * j * X_new / new_l1)
+            cos_k = np.cos(np.pi * k * Y_new / new_l2)
+            reconstructed += a_jk[j_idx, k_idx] * cos_j * cos_k
+    
+    reconstructed = np.clip(reconstructed, 0, 255)
+    return reconstructed.astype(np.uint8)
+
+
+def reconstruct_image_from_coefs(a_jk, new_size, m=100, n=100):
+    """Восстановление изображения.
+    Параметры:
+    a_jk - np.array(матрица коэффицентов посчитанная из оригинальной картинки)
+    new_size - пара чисел с размерами(высота, ширина)
+    m - Количество гармоник по x
+    n - Количество гармоник по y
+    """
+    # Вычисляем коэфмценты
+    
+    new_l1, new_l2 = new_size
+    x_new = np.linspace(0, new_l1-1, new_l1)
+    y_new = np.linspace(0, new_l2-1, new_l2)
+    X_new, Y_new = np.meshgrid(x_new, y_new, indexing='ij')
+    
+    reconstructed = np.zeros((new_l1, new_l2))
+    j_values = np.arange(-m, m+1)
+    k_values = np.arange(-n, n+1)
+    
+    for j_idx, j in enumerate(j_values):
+        for k_idx, k in enumerate(k_values):
+            cos_j = np.cos(np.pi * j * X_new / new_l1)
+            cos_k = np.cos(np.pi * k * Y_new / new_l2)
+            reconstructed += a_jk[j_idx, k_idx] * cos_j * cos_k
+    
+    # Обрезаем значения до диапазона [0, 255] и округляем
+    reconstructed = reconstructed/np.max(reconstructed) * 255
+    reconstructed = np.clip(reconstructed, 0, 255)
+    return reconstructed.astype(np.uint8)
+
+
+def low_pass_filter(image, m, n, threshold):
+
+    """Обнуляет коэффициенты с индексами выше порога (выделение низких частот).
+    Параметры:
+    image - np.array(черно-белая картинка)
+    new_size - пара чисел с новыми размерами(высота, ширина)
+    m - Количество гармоник по x
+    n - Количество гармоник по y
+    threshold - порог обнуления(расстояние от центра)
+    """
+
+    filtered = compute_fourier_coefficients(image, m, n)
+    center_j = filtered.shape[0] // 2
+    center_k = filtered.shape[1] // 2
+    for j in range(filtered.shape[0]):
+        for k in range(filtered.shape[1]):
+            if abs(j - center_j) > threshold or abs(k - center_k) > threshold:
+                filtered[j, k] = 0
+    return reconstruct_image_from_coefs(filtered, image.shape, m, n)
+
+def high_pass_filter(image, m, n, threshold):
+
+    """Обнуляет коэффициенты с индексами ниже порога (выделение высоких частот).
+    Параметры:
+    image - np.array(черно-белая картинка)
+    m - Количество гармоник по x
+    n - Количество гармоник по y 
+    threshold - порог обнуления(расстояние от центра)
+    """
+    
+    filtered = compute_fourier_coefficients(image, m, n)
+    center_j = filtered.shape[0] // 2
+    center_k = filtered.shape[1] // 2
+    for j in range(filtered.shape[0]):
+        for k in range(filtered.shape[1]):
+            if abs(j - center_j) < threshold and abs(k - center_k) < threshold:
+                filtered[j, k] = 0
+    return reconstruct_image_from_coefs(filtered, image.shape, m, n)
